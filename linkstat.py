@@ -1,4 +1,50 @@
 #!/usr/bin/python
+
+#   Copyright 2012 Linkfollower
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+#
+#  
+# Set variable just_load in main to False if fetching links from the web
+# and generate the graph from scratch.
+# Set just_load to True if to post process an existing
+# graph (graphml).
+#
+# Set varialble only_blogs in main to True if only to consider blogs in the
+# post processed graph. Set to False if considering all
+# types of online entries.
+#
+# Set variable name in main to the basename of the indata file to use 
+# (without extension).
+# In case just_load set to False, then indata will be based on
+# the corresponding .ssv file.
+# In case just_load set to True, then indata will be based on
+# the corresponding .graphml file.
+#
+# Other files that are assumed to be present (empty files are fine).
+# force_links.txt   - Contains source and destination urls to force
+#                     a connection between entries.
+# comments.txt      - Contains keywords in urls that are assumed if 
+#                     found to be treated as next comment links in the
+#                     page, i.e. they will be merged with the root url.
+# renamed_links.txt - Contains renamed url mapping, in case several
+#                     variants exists.
+# dontload.txt      - Urls that will not be fetched and parsed,
+#                     due to bad html that will crash the program.
+#                     Typically links from these urls are added
+#                     via the force_links.txt file instead.
+
 import re
 import mechanize
 import cookielib
@@ -33,6 +79,7 @@ def init_browser(br):
     br.addheaders = [('User-agent', 'Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.0.1) Gecko/2008071615 Fedora/3.0.1-1.fc9 Firefox/3.0.1')]
 
 def dump_graph_ids(prefix, g):
+    skip = True
     skip = False
     if skip:
         return
@@ -91,7 +138,6 @@ def read_skv_dict_file(filename):
         value.extend(split_str)
         for j in range(len(value)):
             print 'value[%d]=%s' % (j, value[j])
-        #print cur_str
         if key in d:
             print "Unon unique key %s" % (key)
             raise BaseException('Dict not unique')
@@ -100,7 +146,6 @@ def read_skv_dict_file(filename):
     f.close()
     return d
 
-# Not used!
 def read_dict_file(filename):
     f = open(filename, 'r')
     d = {}
@@ -127,13 +172,6 @@ def read_set_file(filename):
     f.close()
     return s
 
-# Write set to file
-def write_set_file(filename, s):
-    f = open(filename, 'w')
-    for line in s:
-        f.write(line + '\n')
-    f.close()
-
 def get_url_variants(url):
     orig_url = url
     variants = [url]
@@ -144,12 +182,6 @@ def get_url_variants(url):
         if tmp != url:
             url = tmp
             variants.append(url)
-
-#    # Manual regexps
-#    tmp = re.sub("www.greenpeace.org/international/news/", "www.greenpeace.org/international/en/news/features/", url)
-#    if tmp != url:
-#        url = tmp
-#        variants.append(url)
 
     if len(variants) > 1:
         print 'variants for url %s: %s' % (orig_url, variants)
@@ -177,13 +209,13 @@ def handle_url(recursion, from_id, url, br, outgoing_links, linked_urls, linked_
         # If we get here, it is a link to be processed.
         if link in wdict:
             print 'Rec %d, Found %s in whitelist' % (recursion, link)
-            if link not in outgoing_links:
+            if link.lower() not in outgoing_links:
                 # Not already added as outgoing link.
                 from_id = wdict[url]
                 to_id = wdict[link]
                 print '%d -> %d' % (from_id, to_id)
                 g.add_edges([(from_id,to_id)]);
-                outgoing_links.add(link)
+                outgoing_links.add(link.lower())
                 print 'Rec %d, Adding new link %d -> %d' % (recursion, from_id, to_id)
             else:
                 # Already found as outgoing link
@@ -196,19 +228,19 @@ def handle_url(recursion, from_id, url, br, outgoing_links, linked_urls, linked_
             continue
         url_variants = get_url_variants(w)
         for variant in url_variants:
-           if variant in html:
+           if variant.lower() in html.lower():
                if variant != w:
                    print 'XXX: Found variant url link:'
                    print 'Orig link: ' + w
                    print 'Variant link: ' + variant
-               if w not in outgoing_links:
+               if w.lower() not in outgoing_links:
                    print 'Rec %d, found %s as new link in plain text html' % (recursion, w)
                    # Not already added as outgoing link.
                    from_id = wdict[url]
                    to_id = wdict[w]
                    print '%d -> %d' % (from_id, to_id)
                    g.add_edges([(from_id,to_id)]);
-                   outgoing_links.add(link)
+                   outgoing_links.add(link.lower())
                    print 'Rec %d, Adding new link %d -> %d' % (recursion, from_id, to_id)
                    # Jump out of variant for loop.
                    break
@@ -220,31 +252,24 @@ def handle_url(recursion, from_id, url, br, outgoing_links, linked_urls, linked_
             continue
         url_variants = get_url_variants(r)
         for variant in url_variants:
-           if variant in html:
+           if variant.lower() in html.lower():
                if variant != r:
                    print 'XXX: Synonym: Found variant url link:'
                    print 'Synonym: Orig link: ' + r
                    print 'Synonym: Variant link: ' + variant
-               if w not in outgoing_links:
+               if w.lower() not in outgoing_links:
                    print 'Synonym: Rec %d, found %s -> %s as new link in plain text html' % (recursion, r, w)
                    # Not already added as outgoing link.
                    from_id = wdict[url]
                    to_id = wdict[w]
                    print 'Synonym: %d -> %d' % (from_id, to_id)
                    g.add_edges([(from_id,to_id)]);
-                   outgoing_links.add(w)
+                   outgoing_links.add(w.lower())
                    print 'Synonym: Rec %d, Adding new link %d -> %d' % (recursion, from_id, to_id)
                    # Jump out of variant for loop.
                    break
 
     # Recursively call again.
-    
-    do_recursion = True
-    #do_recursion = False
-    
-    if not do_recursion:
-        print 'Skipping recursion'
-        return
 
     something_was_processed = True
     while something_was_processed:
@@ -267,20 +292,22 @@ def handle_url(recursion, from_id, url, br, outgoing_links, linked_urls, linked_
 def plot_graph(g, name):
     layout = g.layout("fr")
 
-    color_dict = {"A": "red", "B": "blue", "C": "green"}
+    color_dict = {"A": "red", "B": "green", "C": "blue"}
     shape_dict = {"Blog" : "circle", "Online news" : "rectangle", "Statement" : "triangle-up", "Feature story" : "triangle-up", "Press release" : "triangle-down"}  
     size_dict = {"alive" : 10, "dead" : 20, "cannot parse" : 10}
     visual_style = {}
     visual_style["vertex_size"] = [size_dict[alive] for alive in g.vs["alive"]]
     visual_style["vertex_color"] = [color_dict[root] for root in g.vs["root"]]
     visual_style["vertex_shape"] = [shape_dict[medium] for medium in g.vs["medium"]]
-    for i in range(0,len(g.vs)):
-        if "greenpeace.org" in g.vs[i]["url"]:
-            visual_style["vertex_size"][i] = 30
+    visual_style["vertex_label_color"] = 'black'
+    visual_style["edge_color"] = 'gray42'
+    visual_style["vertex_label_size"] = '15'
+
     visual_style["bbox"] = (1024,1024)
-    #visual_style["bbox"] = (700, 700)
     visual_style["layout"] = layout
     plot(g, name + '.pdf', **visual_style)
+    plot(g, name + '.svg', **visual_style)
+    plot(g, name + '.png', **visual_style)
 
 def main(name):
     # Browser
@@ -296,7 +323,6 @@ def main(name):
     rename_map = load_renamed_links("renamed_links.txt", wdict)
 
     cset = read_set_file('comments.txt')
-    #wdict = read_dict_file(name + '.txt')
     
     dontloadset = read_dict_file('dontload.txt')
 
@@ -335,8 +361,6 @@ def main(name):
         g.vs[wdict[url]]["alive"] = "alive"
         from_id = wdict[url]
         title = str(br.title())
-        # Remove ISO8859-1 characters.
-        #title.replace("\xe4", "e")
         print 'Id %d, Url %s has title %s' % (from_id, url, title)
         g.vs[from_id]["title"] = title
 
@@ -345,7 +369,6 @@ def main(name):
         linked_urls.add(url);
         linked_urls_processed.add(url);
         outgoing_links = set()
-        #raise BaseException
 
         handle_url(0, from_id, url, br, outgoing_links, linked_urls, linked_urls_processed, wdict, cset, rename_map, g)
 
@@ -353,23 +376,14 @@ def main(name):
 
     g.save(name + '.graphml')
 
-just_load = False
 just_load = True
+just_load = False
 
-only_blogs = False
 only_blogs = True
+only_blogs = False
 
-#name = 'gp6'
-#name = 'google_unique_filtered2'
-#name = 'gp_all_utf8_v2'
-#name = 'g_all'
-#name = 'g_all_v'
-#name = 'gp_all_utf8_new_links2'
-#name = 'g_all_no_dupes_remove_dead'
-#name = 'gp_waves8'
-#name = 'g_waves10'
-name = 'merged'
-#name = 'gp_review'
+#name = 'gp_review5'
+name = 'merged13'
 
 print 'Using name ' + name
 
@@ -459,9 +473,6 @@ else:
     # no links to or from and that are not from root A.
     remove_vertices = g.vs.select(_degree_eq=0).select(root_ne="A")
 
-    #for i in remove_vertices:
-    #    print "Removing vertice: %s" % (i)
-    
     g.delete_vertices(remove_vertices)
 
     # Print and save.
